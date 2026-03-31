@@ -1,13 +1,15 @@
+// 🛰️ แก้ไขส่วน Datasource ให้เชื่อมกับ Cloud
 datasource db {
-  provider = "sqlite"
-  url      = "file:./dev.db"
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")    // สำหรับใช้งานทั่วไป (พอร์ต 6543)
+  directUrl = env("DIRECT_URL")      // สำหรับแก้ตาราง/Migration (พอร์ต 5432)
 }
 
 generator client {
   provider = "prisma-client-js"
 }
 
-// 🤖 1. ตารางเอเจนท์: แก้ไข updatedAt ให้มี Default
+// 🤖 1. ตารางเอเจนท์
 model Agent {
   id           String   @id
   name         String   
@@ -20,7 +22,7 @@ model Agent {
   skills       String   
   tasks        Task[]
   createdAt    DateTime @default(now())
-  updatedAt    DateTime @default(now()) @updatedAt // 👈 เพิ่ม @default(now()) เพื่อแก้ Error
+  updatedAt    DateTime @default(now()) @updatedAt
 }
 
 // 📋 2. ตารางภารกิจ
@@ -38,7 +40,7 @@ model Task {
   agentId      String?
   agent        Agent?   @relation(fields: [agentId], references: [id])
   createdAt    DateTime @default(now())
-  updatedAt    DateTime @default(now()) @updatedAt // 👈 เพิ่มเหมือนกัน
+  updatedAt    DateTime @default(now()) @updatedAt
 }
 
 // 🧠 3. ตารางความจำระยะยาว
@@ -49,7 +51,7 @@ model Memory {
   category  String   @default("Personal")
   agentName String?  
   createdAt DateTime @default(now())
-  updatedAt DateTime @default(now()) @updatedAt // 👈 เพิ่มเหมือนกัน
+  updatedAt DateTime @default(now()) @updatedAt
 }
 
 // 🏢 4. ตารางคลังความรู้บริษัท (Knowledge Base)
@@ -59,5 +61,5 @@ model Knowledge {
   content   String   
   category  String   @default("General")
   createdAt DateTime @default(now())
-  updatedAt DateTime @default(now()) @updatedAt // 👈 เพิ่มเหมือนกัน
+  updatedAt DateTime @default(now()) @updatedAt
 }
