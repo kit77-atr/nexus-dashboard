@@ -173,10 +173,19 @@ export async function POST(req: Request) {
     console.log("🛡️ NEXUS ACTIVE: Operation Initiated");
 
     // 🌟 ดึงข้อมูลจากฐานข้อมูลมาเยอะขึ้นเพื่อเตรียมเช็ค (ขยับเป็น take: 100)
-    const [agents, knowledgeDB] = await Promise.all([
-      prisma.agent.findMany(),
-      prisma.knowledge.findMany({ take: 100 }) 
-    ]);
+    // 🌟 แก้ไข: เพิ่ม try...catch ตรงนี้เพื่อป้องกัน Prisma ขัดข้อง
+    let agents: any[] = [];
+    let knowledgeDB: any[] = [];
+    
+    try {
+      [agents, knowledgeDB] = await Promise.all([
+        prisma.agent.findMany(),
+        prisma.knowledge.findMany({ take: 100 }) 
+      ]);
+    } catch (dbError) {
+      console.warn("⚠️ Database Sync Warning: ไม่สามารถดึงข้อมูลคลังความรู้ได้ ข้ามไปใช้ AI");
+      // ถ้า DB พัง จะปล่อยให้ Array เป็นค่าว่าง เพื่อให้ระบบไหลไปเรียก AI ต่อ
+    }
 
     // --- 🔍 STEP 0: DATABASE DIRECT MATCH (ด่านตรวจค้นข้อมูลในคลัง) ---
     // ตรวจสอบว่าคำถามมีคำที่ตรงกับ Topic ในฐานข้อมูลของเราหรือไม่
@@ -227,7 +236,7 @@ ${squadInfo}
     const coreRaw = await callAI(corePrompt, 'core'); // 🌟 เปลี่ยนชื่อฟังก์ชัน
     const jsonMatch = coreRaw.match(/\{[\s\S]*\}/);
     
-    let targetAgent = agents[0];
+    let targetAgent = agents[0] || { name: 'CORE AI', personality: 'ผู้ช่วยอัจฉริยะ', id: 'default' }; // ป้องกัน Error กรณีดึง agents ไม่ได้
     let coreReason = "Auto-assigned by Protocol";
     let searchContext = "";
     let usedSearch = false;
@@ -236,7 +245,7 @@ ${squadInfo}
     if (jsonMatch) {
       try {
         const coreData = JSON.parse(jsonMatch[0]);
-        targetAgent = agents.find(a => a.name === coreData.assignTo) || agents[0];
+        targetAgent = agents.find(a => a.name === coreData.assignTo) || targetAgent;
         coreReason = coreData.reason || "Direct connection established.";
         
         if (coreData.needSearch && coreData.searchQuery) {
@@ -250,10 +259,12 @@ ${squadInfo}
       }
     }
 
-    await prisma.task.update({
-      where: { id: missionId },
-      data: { agentId: targetAgent.id, progress: 50, searchUsed: usedSearch, searchQuery: queryToSearch }
-    });
+    if(targetAgent.id !== 'default') {
+      await prisma.task.update({
+        where: { id: missionId },
+        data: { agentId: targetAgent.id, progress: 50, searchUsed: usedSearch, searchQuery: queryToSearch }
+      });
+    }
 
     // --- STEP 2: AGENT EXECUTION (🛡️ อัปเกรด: Language Constraints) ---
     const agentPrompt = `คุณคือ ${targetAgent.name} (บุคลิก: ${targetAgent.personality})
