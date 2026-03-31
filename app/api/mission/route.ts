@@ -179,10 +179,12 @@ export async function POST(req: Request) {
     const lowerTask = task.toLowerCase().trim();
     
     // ค้นหาแบบฉลาด: ตรวจสอบว่าคำถามมีคำหลักที่ตรงกับ Topic หรือไม่
-    const match = knowledgeDB.find(k => {
+    // 🌟 แก้ไข: เพิ่ม (k: any)
+    const match = knowledgeDB.find((k: any) => {
       const topicKeywords = k.topic.toLowerCase().trim().split(' ');
       // ถ้าคำถามมี Keyword จาก Topic อย่างน้อย 1 คำ (ที่ยาวกว่า 2 ตัวอักษร) ถือว่าเจอ!
-      return topicKeywords.some(keyword => keyword.length > 2 && lowerTask.includes(keyword));
+      // 🌟 แก้ไข: เพิ่ม (keyword: string) ตามที่ Vercel ร้องขอ
+      return topicKeywords.some((keyword: string) => keyword.length > 2 && lowerTask.includes(keyword));
     });
 
     if (match) {
@@ -211,8 +213,9 @@ export async function POST(req: Request) {
 
     console.log("🛡️ NEXUS ACTIVE: No direct match found, starting AI synthesis...");
     
-    const squadInfo = agents.map(a => `- ${a.name} (Role: ${a.role})`).join('\n');
-    const internalContext = knowledgeDB.slice(0, 5).map(k => `📌 [หมวด ${k.category}] ${k.topic}: ${k.content}`).join('\n');
+    // 🌟 แก้ไข: เพิ่ม (a: any) และ (k: any) เพื่อป้องกัน Vercel ฟ้องอีก
+    const squadInfo = agents.map((a: any) => `- ${a.name} (Role: ${a.role})`).join('\n');
+    const internalContext = knowledgeDB.slice(0, 5).map((k: any) => `📌 [หมวด ${k.category}] ${k.topic}: ${k.content}`).join('\n');
 
     // --- STEP 1: CORE ROUTING ---
     const corePrompt = `คุณคือ CORE AI หน้าที่: วิเคราะห์งาน "${task}"
@@ -233,7 +236,8 @@ ${squadInfo}
     if (jsonMatch) {
       try {
         const coreData = JSON.parse(jsonMatch[0]);
-        targetAgent = agents.find(a => a.name === coreData.assignTo) || targetAgent;
+        // 🌟 แก้ไข: เพิ่ม (a: any)
+        targetAgent = agents.find((a: any) => a.name === coreData.assignTo) || targetAgent;
         coreReason = coreData.reason || "Direct connection established.";
         
         if (coreData.needSearch && coreData.searchQuery) {
