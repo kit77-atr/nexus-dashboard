@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
+import { GoogleGenerativeAI } from '@google/generative-ai'; // 🌟 เพิ่ม SDK ของ Google
 
 const prisma = new PrismaClient();
 
@@ -52,10 +53,11 @@ async function searchWeb(query: string) {
   }
 }
 
-// 🧠 2. ระบบ Routing Model 
-async function callOpenRouter(prompt: string, mode: 'core' | 'agent') {
+// 🧠 2. ระบบ Routing Model (🌟 อัปเกรดมีระบบสำรอง Gemini)
+async function callAI(prompt: string, mode: 'core' | 'agent') {
   const targetModels = await getLiveFreeModels();
 
+  // ด่านที่ 1: ลองใช้ OpenRouter ก่อน
   for (const modelId of targetModels) {
     try {
       console.log(`📡 [${mode.toUpperCase()}] TRYING: ${modelId}...`);
@@ -90,7 +92,26 @@ async function callOpenRouter(prompt: string, mode: 'core' | 'agent') {
     await new Promise(r => setTimeout(r, 1000));
   }
   
-  throw new Error("AI รุ่นฟรีขัดข้องทั้งหมด โปรดลองใหม่ในภายหลัง");
+  // 🌟 ด่านที่ 2 (ไม้ตายสุดท้าย): ถ้า OpenRouter พังหมด สลับไปใช้ Gemini ทันที!
+  console.log("⚠️ OpenRouter โควตาเต็ม! สลับเครื่องยนต์ไปใช้ Gemini API โดยตรง...");
+  if (process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
+    // ใส่รายชื่อรุ่นสำรองของ Google ให้มันลองรันทีละตัว
+    const googleModels = ["gemini-2.0-flash", "gemini-1.5-flash-latest", "gemini-1.5-pro", "gemini-pro"];
+    
+    for (const gModel of googleModels) {
+      try {
+        console.log(`📡 [GEMINI FALLBACK] TRYING: ${gModel}...`);
+        const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GENERATIVE_AI_API_KEY);
+        const model = genAI.getGenerativeModel({ model: gModel });
+        const result = await model.generateContent(prompt);
+        return result.response.text();
+      } catch (geminiError: any) {
+        console.warn(`⚠️ [GEMINI REJECTED] ${gModel} โดนปฏิเสธ:`, geminiError.message);
+      }
+    }
+  }
+
+  throw new Error("AI โควตาฟรีขัดข้องทั้งหมด โปรดเช็ค API Key ของ OpenRouter หรือ Gemini");
 }
 
 // 🔁 3. ฟังก์ชันเรียก AI ซ้ำ
@@ -102,7 +123,7 @@ async function callAIUntilFinished(basePrompt: string, previousContent = "", dep
     currentPrompt = `${basePrompt}\n\n[⚠️ พิมพ์ต่อจากประโยคนี้ให้จบ ห้ามทวนซ้ำ: "${previousContent.slice(-100)}"]`;
   }
 
-  const responseText = await callOpenRouter(currentPrompt, 'agent');
+  const responseText = await callAI(currentPrompt, 'agent'); // 🌟 เปลี่ยนชื่อฟังก์ชัน
   const fullText = previousContent + (previousContent ? " " : "") + responseText;
 
   const isCutOff = responseText.length > 2500 && !/[.!?ๆมาครับค่ะ]$/.test(responseText.trim());
@@ -166,7 +187,7 @@ ${squadInfo}
 
 ตอบ JSON สั้นๆ: {"assignTo": "ชื่อเอเจนท์", "needSearch": true/false, "searchQuery": "คำสั้นๆเพื่อค้นหา", "reason": "สรุปสั้นๆ"}`;
 
-    const coreRaw = await callOpenRouter(corePrompt, 'core');
+    const coreRaw = await callAI(corePrompt, 'core'); // 🌟 เปลี่ยนชื่อฟังก์ชัน
     const jsonMatch = coreRaw.match(/\{[\s\S]*\}/);
     
     let targetAgent = agents[0];
