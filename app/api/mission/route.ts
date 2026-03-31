@@ -172,13 +172,50 @@ export async function POST(req: Request) {
 
     console.log("🛡️ NEXUS ACTIVE: Operation Initiated");
 
+    // 🌟 ดึงข้อมูลจากฐานข้อมูลมาเยอะขึ้นเพื่อเตรียมเช็ค (ขยับเป็น take: 100)
     const [agents, knowledgeDB] = await Promise.all([
       prisma.agent.findMany(),
-      prisma.knowledge.findMany({ take: 3 })
+      prisma.knowledge.findMany({ take: 100 }) 
     ]);
+
+    // --- 🔍 STEP 0: DATABASE DIRECT MATCH (ด่านตรวจค้นข้อมูลในคลัง) ---
+    // ตรวจสอบว่าคำถามมีคำที่ตรงกับ Topic ในฐานข้อมูลของเราหรือไม่
+    const lowerTask = task.toLowerCase();
+    const match = knowledgeDB.find(k => 
+      lowerTask.includes(k.topic.toLowerCase()) || 
+      k.topic.toLowerCase().includes(lowerTask)
+    );
+
+    if (match) {
+      console.log(`🎯 [DATABASE HIT] พบข้อมูลตรงในคลัง: ${match.topic}`);
+      
+      await prisma.task.update({
+        where: { id: missionId },
+        data: { 
+          status: 'completed', 
+          progress: 100, 
+          result: match.content, 
+          summary: `✅ ข้อมูลถูกดึงโดยตรงจากคลังความรู้หัวข้อ: ${match.topic}` 
+        }
+      });
+
+      // ส่งคำตอบกลับไปหาหน้าเว็บทันที ข้ามการเรียก AI ภายนอกทั้งหมด
+      return NextResponse.json({ 
+        result: { 
+          assignTo: ["KNOWLEDGE ENGINE"], 
+          summary: match.content, 
+          coreThinking: "พบข้อมูลที่แม่นยำในฐานข้อมูลส่วนตัว ไม่จำเป็นต้องเรียกใช้ AI ภายนอก ⚡", 
+          webSearch: "Internal Knowledge Base"
+        } 
+      });
+    }
+    // -------------------------------------------------------------
+
+    console.log("🛡️ NEXUS ACTIVE: No direct match found, starting AI synthesis...");
     
     const squadInfo = agents.map(a => `- ${a.name} (Role: ${a.role})`).join('\n');
-    const internalContext = knowledgeDB.map(k => `📌 [หมวด ${k.category}] ${k.topic}: ${k.content}`).join('\n');
+    // ดึงแค่ 5 อันแรกไปเป็น Context ให้ AI เผื่อหาไม่เจอเป๊ะๆ แต่เกี่ยวข้องกัน
+    const internalContext = knowledgeDB.slice(0, 5).map(k => `📌 [หมวด ${k.category}] ${k.topic}: ${k.content}`).join('\n');
 
     // --- STEP 1: CORE ROUTING ---
     const corePrompt = `คุณคือ CORE AI หน้าที่: วิเคราะห์งาน "${task}"
