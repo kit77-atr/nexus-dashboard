@@ -42,6 +42,13 @@ const TypewriterEffect = ({ text }: { text: string }) => {
     const interval = setInterval(() => {
       setDisplayedText((prev) => prev + text.charAt(index));
       index++;
+      
+      // 🌟 แก้ไข: เพิ่มระบบ Auto-Scroll เลื่อนจอตามอัตโนมัติเวลา AI กำลังพิมพ์
+      const chatBox = document.getElementById("nexus-chat-box");
+      if (chatBox) {
+        chatBox.scrollTop = chatBox.scrollHeight;
+      }
+
       if (index >= text.length) clearInterval(interval);
     }, 10); 
     return () => clearInterval(interval);
@@ -353,9 +360,9 @@ export default function NexusDashboard() {
            </div>
         </header>
 
-        {/* Chat Area */}
-        <section className="flex-1 overflow-y-auto px-4 md:px-10 pt-4 pb-32 md:pb-48 custom-scrollbar relative z-10 w-full scroll-smooth">
-          <div className="max-w-4xl mx-auto space-y-8 md:space-y-12 h-full flex flex-col">
+        {/* 🌟 แก้ไข: เพิ่ม id="nexus-chat-box" และปรับ padding ด้านล่างให้เยอะขึ้น เพื่อให้เลื่อนจอได้สุด และเปลี่ยน h-full เป็น min-h-full */}
+        <section id="nexus-chat-box" className="flex-1 overflow-y-auto px-4 md:px-10 pt-4 pb-40 md:pb-64 custom-scrollbar relative z-10 w-full scroll-smooth">
+          <div className="max-w-4xl mx-auto space-y-8 md:space-y-12 min-h-full flex flex-col pb-10">
             
             {logs.length === 0 && (
               <div className="flex-1 flex flex-col items-center justify-center mt-10 md:mt-20 animate-in zoom-in duration-1000 slide-in-from-bottom-10">
@@ -486,6 +493,9 @@ export default function NexusDashboard() {
                 </div>
               </div>
             )}
+            
+            {/* 🌟 แก้ไข: เพิ่มบล็อกช่องว่างดันพื้นที่ด้านล่าง เพื่อรับประกันว่าข้อความจะไม่โดนบัง */}
+            <div className="h-24 md:h-32 shrink-0 w-full"></div>
             <div ref={chatEndRef} />
           </div>
         </section>

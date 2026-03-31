@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
-import { GoogleGenerativeAI } from '@google/generative-ai'; // 🌟 เพิ่ม SDK ของ Google
+import { GoogleGenerativeAI } from '@google/generative-ai'; 
 
 const prisma = new PrismaClient();
 
-// 💾 ระบบ Cache จำรายชื่อรุ่น AI (รีเฟรชทุกๆ 1 ชั่วโมง)
+// 💾 ระบบ Cache จำรายชื่อรุ่น AI 
 let cachedFreeModels: string[] = [];
 let lastFetchTime = 0;
 
@@ -14,7 +14,6 @@ async function getLiveFreeModels() {
   }
   
   try {
-    console.log("🔄 [SYSTEM] กำลังอัปเดตรายชื่อ AI รุ่นฟรีล่าสุด...");
     const res = await fetch("https://openrouter.ai/api/v1/models");
     const data = await res.json();
     
@@ -29,7 +28,6 @@ async function getLiveFreeModels() {
     lastFetchTime = Date.now();
     return freeModels;
   } catch (e) {
-    console.error("⚠️ ดึงรายชื่อ AI ไม่สำเร็จ ใช้ค่าสำรองฉุกเฉิน");
     return ["google/gemini-1.5-flash:free", "meta-llama/llama-3-8b-instruct:free"]; 
   }
 }
@@ -53,11 +51,10 @@ async function searchWeb(query: string) {
   }
 }
 
-// 🧠 2. ระบบ Routing Model (🌟 อัปเกรดมีระบบสำรอง Gemini)
+// 🧠 2. ระบบ Routing Model 
 async function callAI(prompt: string, mode: 'core' | 'agent') {
   const targetModels = await getLiveFreeModels();
 
-  // ด่านที่ 1: ลองใช้ OpenRouter ก่อน
   for (const modelId of targetModels) {
     try {
       console.log(`📡 [${mode.toUpperCase()}] TRYING: ${modelId}...`);
@@ -81,9 +78,6 @@ async function callAI(prompt: string, mode: 'core' | 'agent') {
       if (result.choices && result.choices[0].message.content) {
         return result.choices[0].message.content;
       } 
-      else if (result.error) {
-        console.warn(`⚠️ [API REJECTED] ${modelId} ปฏิเสธ:`, result.error.message);
-      }
       
     } catch (e) {
       console.error(`❌ [NODE CRASH]: ${modelId}`);
@@ -92,10 +86,8 @@ async function callAI(prompt: string, mode: 'core' | 'agent') {
     await new Promise(r => setTimeout(r, 1000));
   }
   
-  // 🌟 ด่านที่ 2 (ไม้ตายสุดท้าย): ถ้า OpenRouter พังหมด สลับไปใช้ Gemini ทันที!
   console.log("⚠️ OpenRouter โควตาเต็ม! สลับเครื่องยนต์ไปใช้ Gemini API โดยตรง...");
   if (process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
-    // ใส่รายชื่อรุ่นสำรองของ Google ให้มันลองรันทีละตัว
     const googleModels = ["gemini-2.0-flash", "gemini-1.5-flash-latest", "gemini-1.5-pro", "gemini-pro"];
     
     for (const gModel of googleModels) {
@@ -123,13 +115,12 @@ async function callAIUntilFinished(basePrompt: string, previousContent = "", dep
     currentPrompt = `${basePrompt}\n\n[⚠️ พิมพ์ต่อจากประโยคนี้ให้จบ ห้ามทวนซ้ำ: "${previousContent.slice(-100)}"]`;
   }
 
-  const responseText = await callAI(currentPrompt, 'agent'); // 🌟 เปลี่ยนชื่อฟังก์ชัน
+  const responseText = await callAI(currentPrompt, 'agent'); 
   const fullText = previousContent + (previousContent ? " " : "") + responseText;
 
   const isCutOff = responseText.length > 2500 && !/[.!?ๆมาครับค่ะ]$/.test(responseText.trim());
 
   if (isCutOff) {
-    console.log(`🔄 [AUTO-CONTINUE] ประโยคขาด ดึงเนื้อหาเพิ่ม...`);
     return await callAIUntilFinished(basePrompt, fullText, depth + 1);
   }
 
@@ -143,23 +134,19 @@ export async function POST(req: Request) {
     let task = formData.get('task') as string;
     const file = formData.get('file') as File | null;
 
-    // 🛡️ ระบบป้องกันไฟล์ใหญ่เกินไป / ไฟล์ผิดประเภท
     if (file) {
-      const MAX_FILE_SIZE = 1000000; // ลิมิตขนาดไฟล์ไว้ที่ 1 MB
+      const MAX_FILE_SIZE = 1000000; 
       const allowedTypes = ['text/plain', 'text/csv', 'text/markdown', 'application/json'];
 
-      console.log(`📎 กำลังตรวจสอบไฟล์: ${file.name} (ขนาด ${file.size} bytes)`);
-
       if (file.size > MAX_FILE_SIZE) {
-        return NextResponse.json({ error: `ไฟล์ใหญ่เกินไป (Max: 1MB) ระบบดึงมาได้แค่: ${file.size} bytes` }, { status: 400 });
+        return NextResponse.json({ error: `ไฟล์ใหญ่เกินไป` }, { status: 400 });
       }
 
       if (!allowedTypes.includes(file.type) && !file.name.endsWith('.txt') && !file.name.endsWith('.csv')) {
-        return NextResponse.json({ error: `ขณะนี้ระบบรองรับเฉพาะไฟล์ข้อความ (เช่น .txt, .csv) ไม่รองรับ ${file.type}` }, { status: 400 });
+        return NextResponse.json({ error: `รองรับเฉพาะไฟล์ข้อความ` }, { status: 400 });
       }
 
       const fileContent = await file.text();
-      // ตัดเนื้อหาให้เหลือแค่ 5000 ตัวอักษร เพื่อเซฟโควตา AI
       const safeContent = fileContent.substring(0, 5000); 
       
       task = `${task}\n\n[ข้อมูลจากไฟล์แนบ: ${file.name}]\n"""\n${safeContent}...\n"""`;
@@ -172,8 +159,6 @@ export async function POST(req: Request) {
 
     console.log("🛡️ NEXUS ACTIVE: Operation Initiated");
 
-    // 🌟 ดึงข้อมูลจากฐานข้อมูลมาเยอะขึ้นเพื่อเตรียมเช็ค (ขยับเป็น take: 100)
-    // 🌟 แก้ไข: เพิ่ม try...catch ตรงนี้เพื่อป้องกัน Prisma ขัดข้อง
     let agents: any[] = [];
     let knowledgeDB: any[] = [];
     
@@ -182,18 +167,23 @@ export async function POST(req: Request) {
         prisma.agent.findMany(),
         prisma.knowledge.findMany({ take: 100 }) 
       ]);
-    } catch (dbError) {
-      console.warn("⚠️ Database Sync Warning: ไม่สามารถดึงข้อมูลคลังความรู้ได้ ข้ามไปใช้ AI");
-      // ถ้า DB พัง จะปล่อยให้ Array เป็นค่าว่าง เพื่อให้ระบบไหลไปเรียก AI ต่อ
+      // 🌟 เพิ่มบรรทัดนี้: พิมพ์บอกถ้าดึงฐานข้อมูลได้สำเร็จ
+      console.log(`📊 [DATABASE CHECK] ดึงข้อมูลคลังความรู้สำเร็จ: ${knowledgeDB.length} รายการ`);
+    } catch (dbError: any) {
+      console.warn("⚠️ Database Sync Warning: ไม่สามารถดึงข้อมูลคลังความรู้ได้");
+      // 🌟 เพิ่มบรรทัดนี้: พิมพ์สาเหตุที่พังออกมาให้เห็นชัดๆ!
+      console.error("🔍 สาเหตุที่แท้จริงคือ:", dbError.message);
     }
 
-    // --- 🔍 STEP 0: DATABASE DIRECT MATCH (ด่านตรวจค้นข้อมูลในคลัง) ---
-    // ตรวจสอบว่าคำถามมีคำที่ตรงกับ Topic ในฐานข้อมูลของเราหรือไม่
-    const lowerTask = task.toLowerCase();
-    const match = knowledgeDB.find(k => 
-      lowerTask.includes(k.topic.toLowerCase()) || 
-      k.topic.toLowerCase().includes(lowerTask)
-    );
+    // --- 🔍 STEP 0: DATABASE DIRECT MATCH (อัปเกรดความฉลาด) ---
+    const lowerTask = task.toLowerCase().trim();
+    
+    // ค้นหาแบบฉลาด: ตรวจสอบว่าคำถามมีคำหลักที่ตรงกับ Topic หรือไม่
+    const match = knowledgeDB.find(k => {
+      const topicKeywords = k.topic.toLowerCase().trim().split(' ');
+      // ถ้าคำถามมี Keyword จาก Topic อย่างน้อย 1 คำ (ที่ยาวกว่า 2 ตัวอักษร) ถือว่าเจอ!
+      return topicKeywords.some(keyword => keyword.length > 2 && lowerTask.includes(keyword));
+    });
 
     if (match) {
       console.log(`🎯 [DATABASE HIT] พบข้อมูลตรงในคลัง: ${match.topic}`);
@@ -208,7 +198,6 @@ export async function POST(req: Request) {
         }
       });
 
-      // ส่งคำตอบกลับไปหาหน้าเว็บทันที ข้ามการเรียก AI ภายนอกทั้งหมด
       return NextResponse.json({ 
         result: { 
           assignTo: ["KNOWLEDGE ENGINE"], 
@@ -223,7 +212,6 @@ export async function POST(req: Request) {
     console.log("🛡️ NEXUS ACTIVE: No direct match found, starting AI synthesis...");
     
     const squadInfo = agents.map(a => `- ${a.name} (Role: ${a.role})`).join('\n');
-    // ดึงแค่ 5 อันแรกไปเป็น Context ให้ AI เผื่อหาไม่เจอเป๊ะๆ แต่เกี่ยวข้องกัน
     const internalContext = knowledgeDB.slice(0, 5).map(k => `📌 [หมวด ${k.category}] ${k.topic}: ${k.content}`).join('\n');
 
     // --- STEP 1: CORE ROUTING ---
@@ -233,10 +221,10 @@ ${squadInfo}
 
 ตอบ JSON สั้นๆ: {"assignTo": "ชื่อเอเจนท์", "needSearch": true/false, "searchQuery": "คำสั้นๆเพื่อค้นหา", "reason": "สรุปสั้นๆ"}`;
 
-    const coreRaw = await callAI(corePrompt, 'core'); // 🌟 เปลี่ยนชื่อฟังก์ชัน
+    const coreRaw = await callAI(corePrompt, 'core'); 
     const jsonMatch = coreRaw.match(/\{[\s\S]*\}/);
     
-    let targetAgent = agents[0] || { name: 'CORE AI', personality: 'ผู้ช่วยอัจฉริยะ', id: 'default' }; // ป้องกัน Error กรณีดึง agents ไม่ได้
+    let targetAgent = agents[0] || { name: 'CORE AI', personality: 'ผู้ช่วยอัจฉริยะ', id: 'default' }; 
     let coreReason = "Auto-assigned by Protocol";
     let searchContext = "";
     let usedSearch = false;
@@ -249,7 +237,6 @@ ${squadInfo}
         coreReason = coreData.reason || "Direct connection established.";
         
         if (coreData.needSearch && coreData.searchQuery) {
-          console.log(`🌐 LIVE SEARCH TRIGGERED: "${coreData.searchQuery}"`);
           searchContext = await searchWeb(coreData.searchQuery);
           usedSearch = true;
           queryToSearch = coreData.searchQuery;
@@ -266,18 +253,17 @@ ${squadInfo}
       });
     }
 
-    // --- STEP 2: AGENT EXECUTION (🛡️ อัปเกรด: Language Constraints) ---
+    // --- STEP 2: AGENT EXECUTION ---
     const agentPrompt = `คุณคือ ${targetAgent.name} (บุคลิก: ${targetAgent.personality})
 [ฐานข้อมูลองค์กร]: ${internalContext || "ไม่มีข้อมูล"}
 [ข้อมูล Internet]: ${searchContext || "ไม่ได้ทำการค้นหา"}
 
 คำสั่งจากผู้ใช้: "${task}"
 
-⚠️ กฎเหล็กในการตอบ (CRITICAL DIRECTIVES):
-1. จงตอบเป็น "ภาษาไทย" ที่ถูกต้อง สละสลวย และอ่านง่ายเท่านั้น
-2. ห้ามใช้ภาษาจีน หรือภาษาอื่นๆ ปนมาเด็ดขาด (STRICTLY NO CHINESE CHARACTERS)
-3. ตรวจทานการพิมพ์ให้ถูกต้อง 100% ห้ามพิมพ์ตกหล่นหรือพิมพ์ผิดแปลกๆ
-4. ใช้ข้อมูลที่ให้มาด้านบนเป็นหลัก หากไม่มีข้อมูลให้แจ้งตามตรง ห้ามแต่งเรื่องเอง`;
+⚠️ กฎเหล็กในการตอบ:
+1. จงตอบเป็น "ภาษาไทย" ที่ถูกต้อง สละสลวย
+2. ห้ามใช้ภาษาจีน หรือภาษาอื่นๆ ปนมาเด็ดขาด 
+3. ตรวจทานการพิมพ์ให้ถูกต้อง 100%`;
 
     const finalOutput = await callAIUntilFinished(agentPrompt);
 
