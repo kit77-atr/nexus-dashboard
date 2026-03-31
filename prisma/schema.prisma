@@ -1,0 +1,63 @@
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// 🤖 1. ตารางเอเจนท์: แก้ไข updatedAt ให้มี Default
+model Agent {
+  id           String   @id
+  name         String   
+  role         String   
+  category     String   
+  personality  String   
+  model        String   @default("google/gemini-2.0-flash-lite:free")
+  sprite       String   
+  effortLevel  Int      @default(1)
+  skills       String   
+  tasks        Task[]
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @default(now()) @updatedAt // 👈 เพิ่ม @default(now()) เพื่อแก้ Error
+}
+
+// 📋 2. ตารางภารกิจ
+model Task {
+  id           String   @id @default(cuid())
+  title        String
+  status       String   @default("pending")
+  progress     Int      @default(0)
+  result       String?  
+  summary      String?  
+  
+  searchQuery  String?  
+  searchUsed   Boolean  @default(false)
+  
+  agentId      String?
+  agent        Agent?   @relation(fields: [agentId], references: [id])
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @default(now()) @updatedAt // 👈 เพิ่มเหมือนกัน
+}
+
+// 🧠 3. ตารางความจำระยะยาว
+model Memory {
+  id        String   @id @default(cuid())
+  key       String   
+  value     String   
+  category  String   @default("Personal")
+  agentName String?  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt // 👈 เพิ่มเหมือนกัน
+}
+
+// 🏢 4. ตารางคลังความรู้บริษัท (Knowledge Base)
+model Knowledge {
+  id        String   @id @default(cuid())
+  topic     String   
+  content   String   
+  category  String   @default("General")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt // 👈 เพิ่มเหมือนกัน
+}
