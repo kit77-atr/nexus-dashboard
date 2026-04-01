@@ -81,7 +81,7 @@ async function sendActionEmail(to: string, content: string) {
   }
 }
 
-// 📊 2.5 ฟังก์ชันดึงยอดขายจาก Database (NEW!)
+// 📊 2.5 ฟังก์ชันดึงยอดขายจาก Database
 async function getSalesStats() {
   try {
     const totalSales = await prisma.sale.aggregate({
@@ -103,6 +103,42 @@ async function getSalesStats() {
     return `📊 ข้อมูลจากระบบ Sales DB:\n- รายได้รวม: ${summaryData.totalRevenue} บาท\n- จำนวนออเดอร์ทั้งหมด: ${summaryData.totalOrders} รายการ\n- รายการล่าสุด: ${summaryData.recentItems}`;
   } catch (e) {
     return "⚠️ ไม่สามารถเข้าถึงข้อมูลยอดขายได้ (ตรวจสอบว่ามีตาราง Sale หรือยัง)";
+  }
+}
+
+// 🧠 2.6 ฟังก์ชันแปลงข้อความเป็น Vector (Corporate Brain - NEW!)
+async function embedCompanyData(text: string) {
+  if (!process.env.GOOGLE_GENERATIVE_AI_API_KEY) throw new Error("No Google API Key");
+  const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GENERATIVE_AI_API_KEY);
+  const model = genAI.getGenerativeModel({ model: "text-embedding-004" });
+  const result = await model.embedContent(text);
+  return result.embedding.values;
+}
+
+// 📚 2.7 ฟังก์ชันค้นหาข้อมูลด้วย Vector Similarity (Corporate Brain - NEW!)
+async function searchCorporateBrain(query: string) {
+  try {
+    const vector = await embedCompanyData(query);
+    const vectorStr = `[${vector.join(',')}]`;
+    
+    // ใช้ Prisma QueryRaw เพื่อค้นหาความหมายที่คล้ายกันใน Vector
+    const matches: any[] = await prisma.$queryRawUnsafe(`
+      SELECT topic, content, 1 - (embedding <=> $1::vector) as similarity
+      FROM "Knowledge"
+      WHERE embedding IS NOT NULL
+      ORDER BY similarity DESC
+      LIMIT 3;
+    `, vectorStr);
+    
+    const goodMatches = matches.filter((m: any) => m.similarity > 0.65); // ตั้งค่าความแม่นยำ
+    if (goodMatches.length > 0) {
+      return goodMatches.map((m: any) => `📌 [เรื่อง ${m.topic}]: ${m.content}`).join("\n");
+    }
+    return null;
+  } catch (e) {
+    // ถ้ายังไม่ได้อัปเดต DB ให้มี Column Vector มันจะแจ้งเตือนเงียบๆ แล้วข้ามไปใช้ระบบเดิม
+    console.log("⚠️ Corporate Brain (Vector) not active yet:", e);
+    return null;
   }
 }
 
@@ -228,13 +264,12 @@ export async function POST(req: Request) {
 
     const lowerTask = task.toLowerCase().trim();
     
-    // 🌟 ระบบสกัดกั้น Action (ป้องกันไม่ให้ Knowledge Engine แย่งงาน!)
+    // 🌟 ระบบสกัดกั้น Action
     const isEmailRequired = lowerTask.includes("ส่งเมล") || lowerTask.includes("ส่งอีเมล") || lowerTask.includes("@");
     const isChainRequired = lowerTask.includes("เขียน") || lowerTask.includes("โค้ด") || lowerTask.includes("code") || lowerTask.includes("สร้างระบบ");
-    const isSalesQuery = lowerTask.includes("ยอดขาย") || lowerTask.includes("สรุปยอด") || lowerTask.includes("sales"); // 🌟 ดักจับคำสั่งขอดูยอดขาย
+    const isSalesQuery = lowerTask.includes("ยอดขาย") || lowerTask.includes("สรุปยอด") || lowerTask.includes("sales"); 
 
     // --- 🔍 STEP 0: DATABASE DIRECT MATCH ---
-    // จะดึงฐานข้อมูลมาตอบตรงๆ ก็ต่อเมื่อ "ไม่ใช่คำสั่ง Action" (รวมคำสั่งยอดขายด้วย)
     if (!isEmailRequired && !isChainRequired && !isSalesQuery) {
       const match = knowledgeDB.find((k: any) => {
         const topicKeywords = k.topic.toLowerCase().trim().split(' ');
@@ -269,7 +304,23 @@ export async function POST(req: Request) {
     console.log("🛡️ NEXUS ACTIVE: Starting AI synthesis...");
     
     const squadInfo = agents.map((a: any) => `- ${a.name} (Role: ${a.role})`).join('\n');
-    const internalContext = knowledgeDB.slice(0, 5).map((k: any) => `📌 [หมวด ${k.category}] ${k.topic}: ${k.content}`).join('\n');
+    
+    // 🌟 THE CORPORATE BRAIN INJECTION (RAG OVERRIDE) 🌟
+    let internalContext = "";
+    let isCorporateBrainActive = false;
+    
+    try {
+      const ragResult = await searchCorporateBrain(task);
+      if (ragResult) {
+        internalContext = ragResult;
+        isCorporateBrainActive = true;
+        console.log("🧠 [CORPORATE BRAIN] RAG Vector Context Loaded Successfully!");
+      } else {
+        internalContext = knowledgeDB.slice(0, 5).map((k: any) => `📌 [หมวด ${k.category}] ${k.topic}: ${k.content}`).join('\n');
+      }
+    } catch(e) {
+      internalContext = knowledgeDB.slice(0, 5).map((k: any) => `📌 [หมวด ${k.category}] ${k.topic}: ${k.content}`).join('\n');
+    }
 
     // --- STEP 1: CORE ROUTING ---
     const corePrompt = `คุณคือ CORE AI หน้าที่: วิเคราะห์งาน "${task}"
@@ -313,99 +364,73 @@ ${squadInfo}
     // --- 🌟 STEP 2: EXECUTION ENGINE ---
     let finalOutput = "";
 
-    // 📊 กรณีที่ 0: สรุปยอดขาย (SALES INTELLIGENCE) - 🌟 เพิ่มเข้ามาใหม่!
+    // 📊 กรณีที่ 0: สรุปยอดขาย
     if (isSalesQuery) {
-      console.log("📊 ACTION: Fetching Sales Data...");
       const rawSalesData = await getSalesStats();
-      
-      const reportPrompt = `คุณคือ FINTECHPRO (Sales Analyst)
-      นี่คือข้อมูลดิบจาก Database:
-      ---
-      ${rawSalesData}
-      ---
-      ภารกิจ: สรุปข้อมูลนี้ให้ Commander Kit ฟังในรูปแบบรายงานสรุปยอดขายที่ดูเป็นมืออาชีพ (ภาษาไทย)
-      และวิเคราะห์สั้นๆ ว่ายอดขายเป็นอย่างไร`;
-      
+      const reportPrompt = `คุณคือ FINTECHPRO (Sales Analyst)\nนี่คือข้อมูลดิบ: ${rawSalesData}\nสรุปข้อมูลนี้ให้ดูเป็นมืออาชีพ (ภาษาไทย)`;
       finalOutput = await callAIUntilFinished(reportPrompt);
       coreReason = "Sales Database Analyzed by FINTECHPRO";
       targetAgent = { name: "FINTECHPRO", id: targetAgent.id };
 
-      // 📧 แถมฟรี: ถ้าสั่งยอดขาย พร้อมระบุอีเมล มันจะวิเคราะห์เสร็จแล้วส่งให้ทันที (Combo Action!)
       if (isEmailRequired) {
         const emailAddress = lowerTask.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/)?.[0];
         if (emailAddress) {
-          console.log(`📧 Dispatching Sales Report to: ${emailAddress}`);
           const status = await sendActionEmail(emailAddress, finalOutput);
-          finalOutput += `\n\n---\n### 📨 ACTION REPORT: EMAIL DISPATCH\n**Status:** ${status}\n**Recipient:** ${emailAddress}`;
+          finalOutput += `\n\n---\n### 📨 ACTION REPORT\n**Status:** ${status}\n**Recipient:** ${emailAddress}`;
         }
       }
     }
-    // 📧 กรณีที่ 1: สั่งส่งอีเมล (TOOL CALLING)
+    // 📧 กรณีที่ 1: สั่งส่งอีเมล
     else if (isEmailRequired) {
-      console.log("🛠️ AGENT ACTION ACTIVATED: EMAIL DISPATCH");
-      
-      // ดึงอีเมลออกจากคำสั่ง (เช่น ดึง t0980029505@gmail.com ออกมา)
       const emailAddress = lowerTask.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/)?.[0];
-      
       if (!emailAddress) {
-          finalOutput = "❌ ไม่พบที่อยู่อีเมลเป้าหมาย กรุณาระบุอีเมลในคำสั่งด้วยครับ Commander (เช่น ส่งเมลไปที่ customer@example.com)";
+          finalOutput = "❌ ไม่พบที่อยู่อีเมลเป้าหมาย";
       } else {
-          console.log(`📧 Dispatching Email to: ${emailAddress}`);
-          
-          // ให้ Agent ร่างจดหมาย
-          const draftPrompt = `คุณคือ BUSINESS MAVEN (Executive Communicator)
-          จงร่างเนื้อหาอีเมลเพื่อแจ้งว่า: "${task}"
-          ตัดคำว่าส่งเมลออกไป เอาเฉพาะเนื้อหาอีเมลล้วนๆ ใช้ภาษาไทยทางการ สุภาพ`;
-          
+          const draftPrompt = `คุณคือ BUSINESS MAVEN\nร่างอีเมลเพื่อแจ้งว่า: "${task}"\nเอาเฉพาะเนื้อหาอีเมลล้วนๆ`;
           const elegantContent = await callAIUntilFinished(draftPrompt);
           const status = await sendActionEmail(emailAddress, elegantContent);
-          
-          finalOutput = `### 📨 ACTION REPORT: EMAIL DISPATCH\n\n**Status:** ${status}\n**Recipient:** ${emailAddress}\n\n---\n\n**Drafted Content:**\n${elegantContent}`;
-          coreReason = "Action Executed: Email Dispatch via Resend API";
+          finalOutput = `### 📨 ACTION REPORT\n**Status:** ${status}\n**Recipient:** ${emailAddress}\n\n---\n\n**Content:**\n${elegantContent}`;
+          coreReason = "Action Executed: Email Dispatch";
           targetAgent = { name: "BUSINESS MAVEN", id: targetAgent.id };
       }
     } 
-    // ⛓️ กรณีที่ 2: งานเขียนโค้ด (AGENT CHAIN)
+    // ⛓️ กรณีที่ 2: งานเขียนโค้ด
     else if (isChainRequired) {
-      console.log("⛓️ AGENT CHAIN ACTIVATED: BYTEFORGE ➡️ CYBERGUARD");
-      
-      const byteforgePrompt = `คุณคือ BYTEFORGE (Lead Developer)
-      งานของคุณคือ: "${task}"
-      [ฐานข้อมูลองค์กร]: ${internalContext || "ไม่มีข้อมูล"}
-      [ข้อมูล Internet]: ${searchContext || "ไม่ได้ทำการค้นหา"}
-      
-      จงเขียนโค้ดให้สมบูรณ์ อธิบายสั้นๆ เป็นภาษาไทย และห้ามมีภาษาจีนปนมาเด็ดขาด`;
-      
+      const byteforgePrompt = `คุณคือ BYTEFORGE\nงานของคุณคือ: "${task}"\n[ฐานข้อมูล]: ${internalContext}\n[Internet]: ${searchContext}\nเขียนโค้ดให้สมบูรณ์`;
       const codeOutput = await callAIUntilFinished(byteforgePrompt);
-      
-      console.log("🛡️ PASSING TO CYBERGUARD FOR SECURITY AUDIT...");
-      const cyberguardPrompt = `คุณคือ CYBERGUARD (Security Auditor)
-      นี่คือโค้ดที่ลูกทีมเพิ่งเขียนเสร็จ:
-      ---
-      ${codeOutput}
-      ---
-      หน้าที่ของคุณ: ตรวจสอบความปลอดภัยของโค้ดด้านบน ห้ามเขียนโค้ดใหม่ ให้คอมเมนต์เฉพาะจุดที่อาจเป็นช่องโหว่ อธิบายเป็นภาษาไทยสั้นๆ อ่านง่าย`;
-      
+      const cyberguardPrompt = `คุณคือ CYBERGUARD\nโค้ด:\n${codeOutput}\nตรวจสอบช่องโหว่ อธิบายเป็นภาษาไทย`;
       const auditOutput = await callAIUntilFinished(cyberguardPrompt);
-
-      finalOutput = `[SYSTEM MESSAGE]: ดำเนินการผ่าน Multi-Agent Protocol ⛓️\n\n### 💻 [DEVELOPMENT OUTPUT: BYTEFORGE]\n${codeOutput}\n\n---\n\n### 🛡️ [SECURITY AUDIT: CYBERGUARD]\n${auditOutput}`;
-      coreReason = "Multi-Agent Chain Completed: Code Generation + Security Verification";
+      finalOutput = `[SYSTEM MESSAGE]: ดำเนินการผ่าน Multi-Agent ⛓️\n\n### 💻 [BYTEFORGE]\n${codeOutput}\n\n---\n\n### 🛡️ [CYBERGUARD]\n${auditOutput}`;
+      coreReason = "Multi-Agent Chain Completed";
       targetAgent = { name: "BYTEFORGE & CYBERGUARD", id: targetAgent.id }; 
-
     } 
-    // 👤 กรณีที่ 3: คำถามทั่วไป (SINGLE AGENT)
+    // 👤 กรณีที่ 3: คำถามทั่วไป (SINGLE AGENT / CORPORATE BRAIN)
     else {
       console.log("👤 SINGLE AGENT ACTIVATED");
-      const agentPrompt = `คุณคือ ${targetAgent.name} (บุคลิก: ${targetAgent.personality})
-      [ฐานข้อมูลองค์กร]: ${internalContext || "ไม่มีข้อมูล"}
-      [ข้อมูล Internet]: ${searchContext || "ไม่ได้ทำการค้นหา"}
+      
+      let currentAgentName = targetAgent.name;
+      let currentPersonality = targetAgent.personality;
+
+      // 🌟 ถ้าเจอข้อมูลใน Corporate Brain (RAG) ให้สลับบุคลิกเป็นผู้เชี่ยวชาญองค์กร!
+      if (isCorporateBrainActive) {
+         console.log("🧠 CORPORATE BRAIN ACTIVATED: Swapping Agent Persona");
+         currentAgentName = "NEXUS CHRONICLE (Corporate Brain)";
+         currentPersonality = "ผู้เชี่ยวชาญด้านข้อมูลบริษัทและกฎระเบียบองค์กร มีหน้าที่ตอบคำถามอิงจากเอกสารบริษัทอย่างแม่นยำ";
+         coreReason = "Corporate Knowledge Extracted via Vector Search (RAG)";
+         targetAgent = { name: currentAgentName, id: targetAgent.id };
+      }
+
+      const agentPrompt = `คุณคือ ${currentAgentName} (บุคลิก: ${currentPersonality})
+      [ฐานข้อมูลองค์กร]: \n${internalContext || "ไม่มีข้อมูล"}
+      [ข้อมูล Internet]: \n${searchContext || "ไม่ได้ทำการค้นหา"}
 
       คำสั่งจากผู้ใช้: "${task}"
 
       ⚠️ กฎเหล็กในการตอบ:
-      1. จงตอบเป็น "ภาษาไทย" ที่ถูกต้อง สละสลวย
-      2. ห้ามใช้ภาษาจีน หรือภาษาอื่นๆ ปนมาเด็ดขาด 
-      3. ตรวจทานการพิมพ์ให้ถูกต้อง 100%`;
+      1. จงตอบเป็น "ภาษาไทย" ที่ถูกต้อง สละสลวย 
+      2. หากมีข้อมูลใน [ฐานข้อมูลองค์กร] ให้อ้างอิงข้อมูลนั้นเป็นหลักในการตอบ
+      3. ห้ามใช้ภาษาจีน ปนมาเด็ดขาด 
+      4. ตรวจทานการพิมพ์ให้ถูกต้อง 100%`;
 
       finalOutput = await callAIUntilFinished(agentPrompt);
     }
