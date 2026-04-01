@@ -110,7 +110,8 @@ async function getSalesStats() {
 async function embedCompanyData(text: string) {
   if (!process.env.GOOGLE_GENERATIVE_AI_API_KEY) throw new Error("No Google API Key");
   const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GENERATIVE_AI_API_KEY);
-  const model = genAI.getGenerativeModel({ model: "text-embedding-004" });
+  // 🎯 แก้ไขชื่อรุ่นให้ตรงกับที่ Kit ทำ Sync สำเร็จ
+  const model = genAI.getGenerativeModel({ model: "models/gemini-embedding-001" });
   const result = await model.embedContent(text);
   return result.embedding.values;
 }
@@ -130,7 +131,8 @@ async function searchCorporateBrain(query: string) {
       LIMIT 3;
     `, vectorStr);
     
-    const goodMatches = matches.filter((m: any) => m.similarity > 0.65); // ตั้งค่าความแม่นยำ
+    // 🎯 ปรับลดความเข้มงวดของ Similarity เป็น 0.6 เพื่อไม่ให้ดึงข้อมูลธุรกิจมั่วซั่ว
+    const goodMatches = matches.filter((m: any) => m.similarity > 0.6); 
     if (goodMatches.length > 0) {
       return goodMatches.map((m: any) => `📌 [เรื่อง ${m.topic}]: ${m.content}`).join("\n");
     }
@@ -179,7 +181,8 @@ async function callAI(prompt: string, mode: 'core' | 'agent') {
   
   console.log("⚠️ OpenRouter โควตาเต็ม! สลับเครื่องยนต์ไปใช้ Gemini API โดยตรง...");
   if (process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
-    const googleModels = ["gemini-2.0-flash", "gemini-1.5-flash-latest", "gemini-1.5-pro", "gemini-pro"];
+    // 🎯 แก้ไขชื่อรุ่น Gemini ให้ถูกต้องตาม API รองรับ
+    const googleModels = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-1.0-pro"];
     
     for (const gModel of googleModels) {
       try {
@@ -270,6 +273,8 @@ export async function POST(req: Request) {
     const isSalesQuery = lowerTask.includes("ยอดขาย") || lowerTask.includes("สรุปยอด") || lowerTask.includes("sales"); 
 
     // --- 🔍 STEP 0: DATABASE DIRECT MATCH ---
+    // 🎯 ปิดการใช้งานส่วนนี้ด้วย Comment เพื่อป้องกันการรีบตอบเกินไป เปิดทางให้ Smart Vector Search ด้านล่างทำงาน
+    /*
     if (!isEmailRequired && !isChainRequired && !isSalesQuery) {
       const match = knowledgeDB.find((k: any) => {
         const topicKeywords = k.topic.toLowerCase().trim().split(' ');
@@ -299,6 +304,7 @@ export async function POST(req: Request) {
         });
       }
     }
+    */
     // -------------------------------------------------------------
 
     console.log("🛡️ NEXUS ACTIVE: Starting AI synthesis...");
@@ -323,11 +329,22 @@ export async function POST(req: Request) {
     }
 
     // --- STEP 1: CORE ROUTING ---
-    const corePrompt = `คุณคือ CORE AI หน้าที่: วิเคราะห์งาน "${task}"
-ทีมที่มี:
-${squadInfo}
+    const corePrompt = `คุณคือ CORE AI ของ Smooth Start Chiang Mai หน้าที่: วิเคราะห์งาน "${task}"
+ตอบ JSON สั้นๆ: 
+{
+  "assignTo": "ชื่อเอเจนท์", 
+  "category": "GENERAL" หรือ "BUSINESS",
+  "needSearch": true/false, 
+  "searchQuery": "คำสั้นๆเพื่อค้นหา", 
+  "reason": "สรุปสั้นๆ"
+}
 
-ตอบ JSON สั้นๆ: {"assignTo": "ชื่อเอเจนท์", "needSearch": true/false, "searchQuery": "คำสั้นๆเพื่อค้นหา", "reason": "สรุปสั้นๆ"}`;
+กฎ: 
+- หากถามข้อมูลทั่วไป (ทางไปไหน, กินอะไร, สภาพอากาศ, ข่าวสาร) ให้จัดเป็น "GENERAL"
+- หากถามเรื่องราคาแพ็กเกจ, วีซ่า, หรือบริการเฉพาะของบริษัท ให้จัดเป็น "BUSINESS"
+
+ทีมที่มี:
+${squadInfo}`;
 
     const coreRaw = await callAI(corePrompt, 'core'); 
     const jsonMatch = coreRaw.match(/\{[\s\S]*\}/);
@@ -337,12 +354,14 @@ ${squadInfo}
     let searchContext = "";
     let usedSearch = false;
     let queryToSearch = null;
+    let aiCategory = "GENERAL"; // 🎯 ค่าเริ่มต้น
 
     if (jsonMatch) {
       try {
         const coreData = JSON.parse(jsonMatch[0]);
         targetAgent = agents.find((a: any) => a.name === coreData.assignTo) || targetAgent;
         coreReason = coreData.reason || "Direct connection established.";
+        aiCategory = coreData.category || "GENERAL"; // 🎯 ดึงประเภทงานมาใช้
         
         if (coreData.needSearch && coreData.searchQuery && !isEmailRequired && !isSalesQuery) {
           searchContext = await searchWeb(coreData.searchQuery);
@@ -413,24 +432,29 @@ ${squadInfo}
 
       // 🌟 ถ้าเจอข้อมูลใน Corporate Brain (RAG) ให้สลับบุคลิกเป็นผู้เชี่ยวชาญองค์กร!
       if (isCorporateBrainActive) {
-         console.log("🧠 CORPORATE BRAIN ACTIVATED: Swapping Agent Persona");
-         currentAgentName = "NEXUS CHRONICLE (Corporate Brain)";
-         currentPersonality = "ผู้เชี่ยวชาญด้านข้อมูลบริษัทและกฎระเบียบองค์กร มีหน้าที่ตอบคำถามอิงจากเอกสารบริษัทอย่างแม่นยำ";
-         coreReason = "Corporate Knowledge Extracted via Vector Search (RAG)";
-         targetAgent = { name: currentAgentName, id: targetAgent.id };
+          console.log("🧠 CORPORATE BRAIN ACTIVATED: Swapping Agent Persona");
+          currentAgentName = "NEXUS CHRONICLE (Corporate Brain)";
+          currentPersonality = "ผู้เชี่ยวชาญด้านข้อมูลบริษัทและกฎระเบียบองค์กร มีหน้าที่ตอบคำถามอิงจากเอกสารบริษัทอย่างแม่นยำ";
+          coreReason = "Corporate Knowledge Extracted via Vector Search (RAG)";
+          targetAgent = { name: currentAgentName, id: targetAgent.id };
       }
 
+
+      // 🎯 อัปเดต Prompt ให้ AI แยกแยะการตอบสนองตาม Category และคุมภาษาไทยขั้นสุด
       const agentPrompt = `คุณคือ ${currentAgentName} (บุคลิก: ${currentPersonality})
-      [ฐานข้อมูลองค์กร]: \n${internalContext || "ไม่มีข้อมูล"}
+      [ประเภทงาน]: ${aiCategory}
+      [ฐานข้อมูลองค์กร]: \n${internalContext || "ไม่มีข้อมูลพิเศษในระบบ"}
       [ข้อมูล Internet]: \n${searchContext || "ไม่ได้ทำการค้นหา"}
 
       คำสั่งจากผู้ใช้: "${task}"
 
-      ⚠️ กฎเหล็กในการตอบ:
-      1. จงตอบเป็น "ภาษาไทย" ที่ถูกต้อง สละสลวย 
-      2. หากมีข้อมูลใน [ฐานข้อมูลองค์กร] ให้อ้างอิงข้อมูลนั้นเป็นหลักในการตอบ
-      3. ห้ามใช้ภาษาจีน ปนมาเด็ดขาด 
-      4. ตรวจทานการพิมพ์ให้ถูกต้อง 100%`;
+      ⚠️ กฎเหล็ก "ภาษาไทยไร้ที่ติ" (THAI LANGUAGE PROTOCOL):
+      1. ห้ามสะกดผิด ห้ามพิมพ์ตัวอักษรซ้ำ (เช่น ณณ, สส) และห้ามลืมใส่สระ/วรรณยุกต์เด็ดขาด
+      2. ตรวจทานการสะกดคำ (Proofread) ทุกบรรทัด "3 รอบ" ในใจก่อนจะส่งคำตอบออกมา
+      3. หากประเภทงานคือ GENERAL: ตอบอย่างเป็นธรรมชาติ สุภาพ และมีระดับ
+      4. หากประเภทงานคือ BUSINESS: ใช้ข้อมูลจาก [ฐานข้อมูลองค์กร] เท่านั้น ห้ามเดาตัวเลขราคาและห้ามพิมพ์ผิดแม้แต่ตัวเดียว
+      5. ห้ามมีภาษาจีน หรือภาษาต่างดาวปนมาในคำตอบภาษาไทยเด็ดขาด
+      6. ใช้ภาษาไทยระดับทางการหรือกึ่งทางการที่ดูเป็นมืออาชีพ (Professional Tone Only)`;
 
       finalOutput = await callAIUntilFinished(agentPrompt);
     }

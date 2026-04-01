@@ -51,10 +51,11 @@ model Memory {
 model Knowledge {
   topic     String
   content   String
-  category  String   @default("General")
-  createdAt DateTime @default(now())
-  updatedAt DateTime @default(now()) @updatedAt
-  id        BigInt   @id @default(autoincrement())
+  category  String                 @default("General")
+  createdAt DateTime               @default(now())
+  updatedAt DateTime               @default(now()) @updatedAt
+  id        BigInt                 @id @default(autoincrement())
+  embedding Unsupported("vector")?
 }
 
 model Sale {
