@@ -56,3 +56,12 @@ model Knowledge {
   updatedAt DateTime @default(now()) @updatedAt
   id        BigInt   @id @default(autoincrement())
 }
+
+model Sale {
+  id          String    @id
+  productName String
+  amount      Float
+  quantity    Int
+  category    String
+  createdAt   DateTime? @default(now()) @db.Timestamptz(6)
+}
