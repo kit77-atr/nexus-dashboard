@@ -3,8 +3,10 @@ import { PrismaClient } from '@prisma/client';
 
 // 🛡️ ป้องกันการสร้าง Prisma Instance ซ้ำซ้อน (Singleton Pattern)
 // ใน Next.js Dev Mode การสร้าง new PrismaClient() ทุกครั้งที่เซฟไฟล์จะทำให้ Connection เต็มไวมาก
-const prisma = global.prisma || new PrismaClient();
-if (process.env.NODE_ENV !== 'production') global.prisma = prisma;
+const prismaClientSingleton = () => new PrismaClient();
+declare global { var prismaGlobal: undefined | ReturnType<typeof prismaClientSingleton>; }
+const prisma = globalThis.prismaGlobal ?? prismaClientSingleton();
+if (process.env.NODE_ENV !== 'production') globalThis.prismaGlobal = prisma;
 
 export async function GET() {
   try {
