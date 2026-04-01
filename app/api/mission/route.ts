@@ -81,6 +81,31 @@ async function sendActionEmail(to: string, content: string) {
   }
 }
 
+// 📊 2.5 ฟังก์ชันดึงยอดขายจาก Database (NEW!)
+async function getSalesStats() {
+  try {
+    const totalSales = await prisma.sale.aggregate({
+      _sum: { amount: true },
+      _count: { id: true }
+    });
+
+    const recentSales = await prisma.sale.findMany({
+      take: 5,
+      orderBy: { createdAt: 'desc' }
+    });
+
+    const summaryData = {
+      totalRevenue: totalSales._sum?.amount || 0,
+      totalOrders: totalSales._count?.id || 0,
+      recentItems: recentSales.map((s: any) => `${s.productName} (${s.amount} บาท)`).join(', ')
+    };
+
+    return `📊 ข้อมูลจากระบบ Sales DB:\n- รายได้รวม: ${summaryData.totalRevenue} บาท\n- จำนวนออเดอร์ทั้งหมด: ${summaryData.totalOrders} รายการ\n- รายการล่าสุด: ${summaryData.recentItems}`;
+  } catch (e) {
+    return "⚠️ ไม่สามารถเข้าถึงข้อมูลยอดขายได้ (ตรวจสอบว่ามีตาราง Sale หรือยัง)";
+  }
+}
+
 // 🧠 3. ระบบ Routing Model 
 async function callAI(prompt: string, mode: 'core' | 'agent') {
   const targetModels = await getLiveFreeModels();
@@ -206,10 +231,11 @@ export async function POST(req: Request) {
     // 🌟 ระบบสกัดกั้น Action (ป้องกันไม่ให้ Knowledge Engine แย่งงาน!)
     const isEmailRequired = lowerTask.includes("ส่งเมล") || lowerTask.includes("ส่งอีเมล") || lowerTask.includes("@");
     const isChainRequired = lowerTask.includes("เขียน") || lowerTask.includes("โค้ด") || lowerTask.includes("code") || lowerTask.includes("สร้างระบบ");
+    const isSalesQuery = lowerTask.includes("ยอดขาย") || lowerTask.includes("สรุปยอด") || lowerTask.includes("sales"); // 🌟 ดักจับคำสั่งขอดูยอดขาย
 
     // --- 🔍 STEP 0: DATABASE DIRECT MATCH ---
-    // จะดึงฐานข้อมูลมาตอบตรงๆ ก็ต่อเมื่อ "ไม่ใช่คำสั่ง Action"
-    if (!isEmailRequired && !isChainRequired) {
+    // จะดึงฐานข้อมูลมาตอบตรงๆ ก็ต่อเมื่อ "ไม่ใช่คำสั่ง Action" (รวมคำสั่งยอดขายด้วย)
+    if (!isEmailRequired && !isChainRequired && !isSalesQuery) {
       const match = knowledgeDB.find((k: any) => {
         const topicKeywords = k.topic.toLowerCase().trim().split(' ');
         return topicKeywords.some((keyword: string) => keyword.length > 2 && lowerTask.includes(keyword));
@@ -267,7 +293,7 @@ ${squadInfo}
         targetAgent = agents.find((a: any) => a.name === coreData.assignTo) || targetAgent;
         coreReason = coreData.reason || "Direct connection established.";
         
-        if (coreData.needSearch && coreData.searchQuery && !isEmailRequired) {
+        if (coreData.needSearch && coreData.searchQuery && !isEmailRequired && !isSalesQuery) {
           searchContext = await searchWeb(coreData.searchQuery);
           usedSearch = true;
           queryToSearch = coreData.searchQuery;
@@ -287,8 +313,35 @@ ${squadInfo}
     // --- 🌟 STEP 2: EXECUTION ENGINE ---
     let finalOutput = "";
 
+    // 📊 กรณีที่ 0: สรุปยอดขาย (SALES INTELLIGENCE) - 🌟 เพิ่มเข้ามาใหม่!
+    if (isSalesQuery) {
+      console.log("📊 ACTION: Fetching Sales Data...");
+      const rawSalesData = await getSalesStats();
+      
+      const reportPrompt = `คุณคือ FINTECHPRO (Sales Analyst)
+      นี่คือข้อมูลดิบจาก Database:
+      ---
+      ${rawSalesData}
+      ---
+      ภารกิจ: สรุปข้อมูลนี้ให้ Commander Kit ฟังในรูปแบบรายงานสรุปยอดขายที่ดูเป็นมืออาชีพ (ภาษาไทย)
+      และวิเคราะห์สั้นๆ ว่ายอดขายเป็นอย่างไร`;
+      
+      finalOutput = await callAIUntilFinished(reportPrompt);
+      coreReason = "Sales Database Analyzed by FINTECHPRO";
+      targetAgent = { name: "FINTECHPRO", id: targetAgent.id };
+
+      // 📧 แถมฟรี: ถ้าสั่งยอดขาย พร้อมระบุอีเมล มันจะวิเคราะห์เสร็จแล้วส่งให้ทันที (Combo Action!)
+      if (isEmailRequired) {
+        const emailAddress = lowerTask.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/)?.[0];
+        if (emailAddress) {
+          console.log(`📧 Dispatching Sales Report to: ${emailAddress}`);
+          const status = await sendActionEmail(emailAddress, finalOutput);
+          finalOutput += `\n\n---\n### 📨 ACTION REPORT: EMAIL DISPATCH\n**Status:** ${status}\n**Recipient:** ${emailAddress}`;
+        }
+      }
+    }
     // 📧 กรณีที่ 1: สั่งส่งอีเมล (TOOL CALLING)
-    if (isEmailRequired) {
+    else if (isEmailRequired) {
       console.log("🛠️ AGENT ACTION ACTIVATED: EMAIL DISPATCH");
       
       // ดึงอีเมลออกจากคำสั่ง (เช่น ดึง t0980029505@gmail.com ออกมา)
