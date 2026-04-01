@@ -22,16 +22,25 @@ const getCategoryTheme = (category: string) => {
   }
 };
 
-// --- คอมโพเนนต์ใหม่: แปลงชื่อเป็นไอคอน ---
+// --- คอมโพเนนต์ใหม่: แปลงชื่อเป็นไอคอน (🌟 อัปเกรดเป็นรูประบบ 3D/รูปอัปโหลด) ---
 const DynamicIcon = ({ name, className }: { name: string, className?: string }) => {
   if (!name) return <Sparkles className={className} />;
   
-  const pascalName = name.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join('');
-  const IconComponent = (icons as any)[pascalName];
+  // แปลงชื่อ Agent เป็นตัวเล็กติดกันเพื่อใช้เรียกไฟล์ เช่น "Nexus Core" -> "nexuscore"
+  const formattedName = name.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
 
-  if (!IconComponent) return <span className="text-xl font-bold">{name.substring(0,2).toUpperCase()}</span>;
-  
-  return <IconComponent className={className} />;
+  return (
+    <img 
+      // 1. พยายามดึงรูปจากโฟลเดอร์ public/avatars/ ก่อน
+      src={`/avatars/${formattedName}.png`} 
+      alt={name} 
+      className={`${className} object-cover w-full h-full rounded-full`}
+      onError={(e) => {
+        // 2. ถ้าหารูปในโฟลเดอร์ไม่เจอ ให้ดึงรูปหุ่นรบ 3D สุ่มอัตโนมัติจาก DiceBear
+        (e.target as HTMLImageElement).src = `https://api.dicebear.com/7.x/bottts/svg?seed=${formattedName}&baseColor=475569,2563eb,8b5cf6&textureChance=100`;
+      }}
+    />
+  );
 };
 
 // --- คอมโพเนนต์ Typewriter ---
@@ -175,6 +184,21 @@ export default function NexusDashboard() {
       
       const data = await res.json();
       
+      // 🌟 เพิ่มการดักจับ Error กรณี API หมดโควตา (Rate Limit / Insufficient Credits)
+      if (!res.ok || data.error) {
+         const errorMessage = data.error?.toLowerCase() || "";
+         if (errorMessage.includes('limit') || errorMessage.includes('quota') || errorMessage.includes('credit') || errorMessage.includes('free') || errorMessage.includes('429')) {
+             setLogs(prev => [...prev, { 
+                role: 'error', 
+                text: '⚠️ SYSTEM ALERT: ฐานข้อมูล API ฟรีถึงขีดจำกัดแล้ว (RATE LIMIT EXCEEDED).\n\nกรุณารอสักครู่ (ระบบจะรีเซ็ตโควตาอัตโนมัติในอีกประมาณ 1-5 นาที)', 
+                time: new Date().toLocaleTimeString() 
+             }]);
+         } else {
+             setLogs(prev => [...prev, { role: 'error', text: `API_ERROR: ${data.error || 'Connection Failed'}`, time: new Date().toLocaleTimeString() }]);
+         }
+         return; // หยุดการทำงานถ้าเกิด Error
+      }
+      
       if (data.result) {
         setLogs(prev => [...prev, 
           { role: 'system', text: `SYNC SECURED: [${data.result.assignTo[0]}] ENGAGED.`, time: new Date().toLocaleTimeString(), searchMode: data.result.webSearch },
@@ -194,7 +218,7 @@ export default function NexusDashboard() {
   const categories = ["CORE", "TECH", "CREATIVE", "BUSINESS", "FINANCE"];
   
   const getAgentInfo = (agentName: string) => {
-    return agents.find(a => a.name === agentName) || { icon: 'brain', category: 'CORE', sprite: '🤖' };
+    return agents.find(a => a.name === agentName) || { icon: 'brain', category: 'CORE', sprite: '🤖', name: agentName };
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -213,7 +237,7 @@ export default function NexusDashboard() {
     <div className="flex h-[100dvh] w-full bg-[#020205] text-slate-200 font-sans overflow-hidden selection:bg-blue-500/30 selection:text-white relative">
       
       {/* 🌌 Cosmic Background */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+      <div className="absolute inset-0 overflow-hidden pointer-events-none z-0">
         <div className="absolute top-[-20%] left-[-10%] w-[50%] h-[50%] bg-blue-600/10 blur-[120px] rounded-full mix-blend-screen"></div>
         <div className="absolute bottom-[-20%] right-[-10%] w-[60%] h-[60%] bg-violet-600/10 blur-[150px] rounded-full mix-blend-screen"></div>
         <div className="absolute top-[20%] right-[20%] w-[30%] h-[30%] bg-cyan-500/5 blur-[100px] rounded-full mix-blend-screen animate-pulse-slow"></div>
@@ -257,7 +281,7 @@ export default function NexusDashboard() {
         </button>
 
         {/* Premium Logo */}
-        <div className="flex items-center gap-4 mb-8 group cursor-pointer mt-2 md:mt-0">
+        <div className="flex items-center gap-4 mb-8 group cursor-pointer mt-2 md:mt-0 relative z-10">
           <div className="relative flex items-center justify-center w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-500/20 to-violet-500/20 border border-white/10 shadow-[0_0_20px_rgba(59,130,246,0.15)] group-hover:shadow-[0_0_30px_rgba(139,92,246,0.3)] transition-all duration-500 overflow-hidden">
             <Sparkles className="w-6 h-6 text-blue-300 shimmer" />
           </div>
@@ -270,12 +294,12 @@ export default function NexusDashboard() {
         </div>
 
         {/* Floating Tabs */}
-        <div className="flex p-1 bg-black/20 rounded-xl border border-white/5 mb-8">
+        <div className="flex p-1 bg-black/20 rounded-xl border border-white/5 mb-8 relative z-10">
           <button onClick={() => setActiveTab('agents')} className={`flex-1 py-2 rounded-lg text-[10px] md:text-[11px] font-bold tracking-widest transition-all duration-300 ${activeTab === 'agents' ? 'bg-white/10 text-white shadow-md' : 'text-slate-500 hover:text-slate-300'}`}>ROSTER</button>
           <button onClick={() => setActiveTab('history')} className={`flex-1 py-2 rounded-lg text-[10px] md:text-[11px] font-bold tracking-widest transition-all duration-300 ${activeTab === 'history' ? 'bg-white/10 text-white shadow-md' : 'text-slate-500 hover:text-slate-300'}`}>ARCHIVE</button>
         </div>
         
-        <div className="flex-1 overflow-y-auto space-y-6 md:space-y-8 pr-2 custom-scrollbar pb-10">
+        <div className="flex-1 overflow-y-auto space-y-6 md:space-y-8 pr-2 custom-scrollbar pb-10 relative z-10">
           {activeTab === 'agents' ? (
             categories.map(cat => {
               const catAgents = agents.filter(a => a.category === cat);
@@ -284,15 +308,12 @@ export default function NexusDashboard() {
                 <div key={cat} className="space-y-3 md:space-y-4 animate-in fade-in slide-in-from-left-4 duration-700">
                   <p className="text-[9px] md:text-[10px] font-bold text-slate-500 uppercase tracking-[0.4em] font-mono ml-2">{cat}</p>
                   {catAgents.map(a => {
-                    // 🌟 ดึงสีโลโก้ตาม Category
                     const theme = getCategoryTheme(a.category);
                     
                     return (
                       <div key={a.id} className="flex items-center gap-4 p-2.5 md:p-3 rounded-2xl hover:bg-white/5 transition-all duration-300 cursor-pointer group">
-                        {/* 🌟 โลโก้มีสีสัน */}
-                        <div className={`flex items-center justify-center w-10 h-10 md:w-12 md:h-12 bg-gradient-to-br ${theme} rounded-full border border-white/20 group-hover:scale-110 transition-all duration-300 shadow-lg relative overflow-hidden`}>
-                          <div className="absolute inset-0 bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                          <DynamicIcon name={a.icon || a.sprite} className="w-4 h-4 md:w-5 md:h-5 drop-shadow-md" />
+                        <div className={`flex items-center justify-center w-10 h-10 md:w-12 md:h-12 bg-gradient-to-br ${theme} p-0.5 rounded-full group-hover:scale-110 transition-all duration-300 shadow-lg relative overflow-hidden`}>
+                          <DynamicIcon name={a.name} className="w-full h-full" />
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="text-[13px] md:text-[14px] font-semibold text-slate-200 group-hover:text-white truncate transition-colors">{a.name}</p>
@@ -323,7 +344,7 @@ export default function NexusDashboard() {
         </div>
 
         {/* Minimal Telemetry */}
-        <div className="mt-auto pt-6 border-t border-white/5 flex items-center justify-between px-2">
+        <div className="mt-auto pt-6 border-t border-white/5 flex items-center justify-between px-2 relative z-10">
            <div className="flex flex-col gap-2">
               <span className="text-[8px] md:text-[9px] text-slate-400 font-mono uppercase tracking-[0.2em] flex items-center gap-2">Neural Load <span className="text-blue-400">{sysLoad}%</span></span>
               <div className="flex gap-1 h-1.5 w-20 md:w-24 bg-white/5 rounded-full overflow-hidden">
@@ -335,12 +356,11 @@ export default function NexusDashboard() {
       </aside>
 
       {/* 🚀 2. Main Center */}
-      <main className="flex-1 flex flex-col h-[100dvh] relative z-20 w-full overflow-hidden">
+      <main className="flex-1 flex flex-col h-[100dvh] relative z-20 w-full overflow-hidden bg-transparent">
         
         {/* Sleek Top Bar (Responsive) */}
         <header className="h-16 md:h-20 shrink-0 flex items-center justify-between px-4 md:px-10 z-10 glass-panel md:bg-transparent md:border-none md:backdrop-filter-none border-b border-white/5">
            <div className="flex items-center gap-3">
-             {/* 📱 ปุ่มเปิด Sidebar บนมือถือ */}
              <button 
                onClick={() => setIsSidebarOpen(true)}
                className="md:hidden p-2 -ml-2 text-slate-300 hover:text-white transition-colors rounded-full hover:bg-white/5"
@@ -360,7 +380,6 @@ export default function NexusDashboard() {
            </div>
         </header>
 
-        {/* 🌟 แก้ไข: เพิ่ม id="nexus-chat-box" และปรับ padding ด้านล่างให้เยอะขึ้น เพื่อให้เลื่อนจอได้สุด และเปลี่ยน h-full เป็น min-h-full */}
         <section id="nexus-chat-box" className="flex-1 overflow-y-auto px-4 md:px-10 pt-4 pb-40 md:pb-64 custom-scrollbar relative z-10 w-full scroll-smooth">
           <div className="max-w-4xl mx-auto space-y-8 md:space-y-12 min-h-full flex flex-col pb-10">
             
@@ -404,15 +423,14 @@ export default function NexusDashboard() {
                   
                   {log.role !== 'system' && (
                     <div className={`shrink-0 w-8 h-8 md:w-12 md:h-12 flex items-center justify-center text-sm md:text-xl rounded-full relative overflow-hidden shadow-xl ${
-                      log.role === 'user' ? 'bg-gradient-to-br from-blue-600 to-violet-600' : 
-                      log.role === 'error' ? 'bg-gradient-to-br from-red-600 to-orange-600' : 
-                      // 🌟 สีโลโก้ในแชทให้ตรงกับสายงาน
-                      `bg-gradient-to-br ${theme}`
+                      log.role === 'user' ? 'bg-gradient-to-br from-blue-600 to-violet-600 p-0' : 
+                      log.role === 'error' ? 'bg-gradient-to-br from-red-600 to-orange-600 p-0' : 
+                      `bg-gradient-to-br ${theme} p-0.5`
                     }`}>
-                      <span className="relative z-10 flex items-center justify-center drop-shadow-md">
+                      <span className="relative z-10 w-full h-full flex items-center justify-center drop-shadow-md">
                         {log.role === 'user' ? '😎' : 
                          log.role === 'error' ? '💥' : 
-                         <DynamicIcon name={agentDetails.icon || agentDetails.sprite} className="w-4 h-4 md:w-6 md:h-6 text-white" />
+                         <DynamicIcon name={agentDetails.name} className="w-full h-full" />
                         }
                       </span>
                     </div>
@@ -437,7 +455,7 @@ export default function NexusDashboard() {
                       
                       {log.role === 'system' && (
                         <div className="flex flex-col items-center gap-2 md:gap-3">
-                          <div className={`flex items-center gap-1.5 md:gap-2 font-bold tracking-[0.1em] md:tracking-[0.2em] uppercase text-[8px] md:text-[10px] px-3 md:px-4 py-1.5 rounded-full glass-card ${log.text.includes('ABORTED') ? 'text-red-400 border-red-500/30' : 'text-blue-300 border-blue-500/20'}`}>
+                          <div className={`flex items-center gap-1.5 md:gap-2 font-bold tracking-[0.1em] md:tracking-[0.2em] uppercase text-[8px] md:text-[10px] px-3 md:px-4 py-1.5 rounded-full glass-card ${log.text.includes('ABORTED') ? 'text-red-400 border-red-500/30' : log.text.includes('RATE LIMIT') ? 'text-amber-400 border-amber-500/30 bg-amber-950/40' : 'text-blue-300 border-blue-500/20'}`}>
                             {log.text.includes('ABORTED') ? <StopCircle className="w-3 h-3 md:w-3.5 md:h-3.5"/> : <CheckCircle2 className="w-3 h-3 md:w-3.5 md:h-3.5"/>} 
                             {log.text}
                           </div>
@@ -494,13 +512,12 @@ export default function NexusDashboard() {
               </div>
             )}
             
-            {/* 🌟 แก้ไข: เพิ่มบล็อกช่องว่างดันพื้นที่ด้านล่าง เพื่อรับประกันว่าข้อความจะไม่โดนบัง */}
             <div className="h-24 md:h-32 shrink-0 w-full"></div>
             <div ref={chatEndRef} />
           </div>
         </section>
 
-        {/* ⌨️ Floating Dock Console (Mobile Safe Bottom) */}
+        {/* ⌨️ Floating Dock Console */}
         <div className="absolute bottom-4 md:bottom-10 left-0 right-0 px-4 md:px-8 z-20 flex justify-center pb-safe">
           <div className="w-full max-w-3xl relative pointer-events-auto group/console">
             
